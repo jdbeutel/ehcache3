@@ -16,20 +16,16 @@
 
 package org.ehcache.internal.tier;
 
-import org.ehcache.core.spi.store.StoreAccessException;
+import org.ehcache.spi.resilience.StoreAccessException;
 import org.ehcache.core.spi.store.Store;
 import org.ehcache.core.spi.store.tiering.AuthoritativeTier;
 import org.ehcache.spi.test.After;
-import org.ehcache.spi.test.Before;
 import org.ehcache.spi.test.LegalSPITesterException;
 import org.ehcache.spi.test.SPITest;
 
-import java.util.concurrent.TimeUnit;
-
-import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
-import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -48,15 +44,10 @@ public class AuthoritativeTierFlush<K, V> extends SPIAuthoritativeTierTester<K, 
     super(factory);
   }
 
-  @Before
-  public void setUp() {
-  }
-
   @After
   public void tearDown() {
     if (tier != null) {
-//      tier.close();
-      tier = null;
+      factory.close(tier);
     }
   }
 
@@ -66,7 +57,7 @@ public class AuthoritativeTierFlush<K, V> extends SPIAuthoritativeTierTester<K, 
     K key = factory.createKey(1);
     final V value = factory.createValue(1);
     Store.ValueHolder<V> valueHolder = mock(Store.ValueHolder.class);
-    when(valueHolder.expirationTime(any(TimeUnit.class))).thenReturn(1L);
+    when(valueHolder.expirationTime()).thenReturn(1L);
 
     tier = factory.newStoreWithCapacity(1L);
 
@@ -87,7 +78,7 @@ public class AuthoritativeTierFlush<K, V> extends SPIAuthoritativeTierTester<K, 
     K key = factory.createKey(1);
     final V value = factory.createValue(1);
     Store.ValueHolder<V> valueHolder = mock(Store.ValueHolder.class);
-    when(valueHolder.expirationTime(any(TimeUnit.class))).thenReturn(1L);
+    when(valueHolder.expirationTime()).thenReturn(1L);
 
     tier = factory.newStoreWithCapacity(1L);
 
@@ -105,7 +96,7 @@ public class AuthoritativeTierFlush<K, V> extends SPIAuthoritativeTierTester<K, 
   public void entryDoesNotExist() {
     K key = factory.createKey(1);
     Store.ValueHolder<V> valueHolder = mock(Store.ValueHolder.class);
-    when(valueHolder.expirationTime(any(TimeUnit.class))).thenReturn(1L);
+    when(valueHolder.expirationTime()).thenReturn(1L);
 
     tier = factory.newStoreWithCapacity(1L);
 

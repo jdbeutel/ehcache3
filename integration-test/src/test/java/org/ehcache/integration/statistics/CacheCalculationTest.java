@@ -19,6 +19,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.stream.StreamSupport;
 
 import org.assertj.core.data.MapEntry;
 import org.ehcache.Cache;
@@ -29,10 +30,12 @@ import org.ehcache.config.builders.CacheManagerBuilder;
 import org.ehcache.config.builders.ResourcePoolsBuilder;
 import org.ehcache.core.spi.service.StatisticsService;
 import org.ehcache.impl.config.persistence.DefaultPersistenceConfiguration;
-import org.ehcache.impl.internal.statistics.DefaultStatisticsService;
+import org.ehcache.core.internal.statistics.DefaultStatisticsService;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Check that calculations are accurate according to specification. Each cache method have a different impact on the statistics
@@ -73,8 +76,6 @@ public class CacheCalculationTest extends AbstractCacheCalculationTest {
     }
   }
 
-  // WARNING: forEach and spliterator can't be tested because they are Java 8
-
   @Test
   public void clear() {
     cache.put(1, "a");
@@ -109,6 +110,7 @@ public class CacheCalculationTest extends AbstractCacheCalculationTest {
     changesOf(1, 0, 0, 0);
   }
 
+  @SuppressWarnings("unchecked")
   @Test
   public void getAll() {
     expect(cache.getAll(asSet(1))).containsExactly(MapEntry.entry(1, null));
@@ -129,10 +131,10 @@ public class CacheCalculationTest extends AbstractCacheCalculationTest {
     changesOf(0, 0, 2, 0);
 
     Iterator<Cache.Entry<Integer, String>> iterator = cache.iterator();
-    changesOf(1, 0, 0, 0); // FIXME Why one?!?
+    changesOf(0, 0, 0, 0);
 
     iterator.next().getKey();
-    changesOf(2, 0, 0, 0); // FIXME Why two?!?
+    changesOf(1, 0, 0, 0);
 
     expect(iterator.hasNext()).isTrue();
     changesOf(0, 0, 0, 0);
@@ -148,6 +150,28 @@ public class CacheCalculationTest extends AbstractCacheCalculationTest {
   }
 
   @Test
+  public void foreach() {
+    cache.put(1, "a");
+    cache.put(2, "b");
+    cache.put(3, "c");
+    changesOf(0, 0, 3, 0);
+
+    cache.forEach(e -> {});
+    changesOf(3, 0, 0, 0);
+  }
+
+  @Test
+  public void spliterator() {
+    cache.put(1, "a");
+    cache.put(2, "b");
+    cache.put(3, "c");
+    changesOf(0, 0, 3, 0);
+
+    StreamSupport.stream(cache.spliterator(), false).forEach(e -> {});
+    changesOf(3, 0, 0, 0);
+  }
+
+  @Test
   public void put() {
     cache.put(1, "a");
     changesOf(0, 0, 1, 0);
@@ -158,7 +182,7 @@ public class CacheCalculationTest extends AbstractCacheCalculationTest {
 
   @Test
   public void putAll() {
-    Map<Integer, String> vals = new HashMap<Integer, String>();
+    Map<Integer, String> vals = new HashMap<>();
     vals.put(1, "a");
     vals.put(2, "b");
     cache.putAll(vals);
@@ -254,13 +278,30 @@ public class CacheCalculationTest extends AbstractCacheCalculationTest {
     cache.get(1); // one miss
     cache.getAll(asSet(1, 2, 3)); // 3 misses
     cache.put(1, "a"); // one put
+    cache.put(1, "b"); // one put and update
     cache.putAll(Collections.singletonMap(2, "b")); // 1 put
     cache.get(1); // one hit
     cache.remove(1); // one remove
     cache.removeAll(asSet(2)); // one remove
-    changesOf(1, 4, 2, 2);
+    changesOf(1, 4, 3, 2);
 
     cacheStatistics.clear();
-    changesOf(-1, -4, -2, -2);
+    changesOf(-1, -4, -3, -2);
+  }
+
+  @Test
+  public void testEviction() {
+    String payload = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    // Wait until we reach the maximum that we can fit in
+    int i = 0;
+    long evictions;
+    do {
+      cache.put(i++, payload);
+      evictions = cacheStatistics.getCacheEvictions();
+    }
+    while(evictions == 0 && i < 100_000);
+
+    assertThat(evictions).isGreaterThan(0);
   }
 }

@@ -19,6 +19,7 @@ package org.ehcache.integration;
 import org.ehcache.CacheManager;
 import org.ehcache.PersistentCacheManager;
 import org.ehcache.config.builders.CacheManagerBuilder;
+import org.ehcache.config.units.EntryUnit;
 import org.ehcache.config.units.MemoryUnit;
 import org.ehcache.impl.copy.SerializingCopier;
 import org.ehcache.integration.domain.Person;
@@ -28,7 +29,6 @@ import org.ehcache.spi.serialization.SerializerException;
 import org.ehcache.spi.serialization.StatefulSerializer;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.ExpectedException;
 import org.junit.rules.TemporaryFolder;
 
 import java.nio.ByteBuffer;
@@ -37,43 +37,41 @@ import static org.ehcache.config.builders.CacheConfigurationBuilder.newCacheConf
 import static org.ehcache.config.builders.CacheManagerBuilder.newCacheManagerBuilder;
 import static org.ehcache.config.builders.CacheManagerBuilder.persistence;
 import static org.ehcache.config.builders.ResourcePoolsBuilder.newResourcePoolsBuilder;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
-import static org.junit.Assert.assertThat;
 
 public class SerializersTest {
 
   @Rule
   public TemporaryFolder temporaryFolder = new TemporaryFolder();
-  @Rule
-  public ExpectedException expectedException = ExpectedException.none();
 
   @Test
   public void testStatefulSerializer() throws Exception {
-    StatefulSerializerImpl<Long> serializer = new StatefulSerializerImpl<Long>();
+    StatefulSerializerImpl<Long> serializer = new StatefulSerializerImpl<>();
     testSerializerWithByRefHeapCache(serializer);
     assertThat(serializer.initCount, is(0));
 
-    serializer = new StatefulSerializerImpl<Long>();
+    serializer = new StatefulSerializerImpl<>();
     testSerializerWithByValueHeapCache(serializer);
     assertThat(serializer.initCount, is(1));
 
-    serializer = new StatefulSerializerImpl<Long>();
+    serializer = new StatefulSerializerImpl<>();
     testSerializerWithOffheapCache(serializer);
     assertThat(serializer.initCount, is(1));
 
-    serializer = new StatefulSerializerImpl<Long>();
+    serializer = new StatefulSerializerImpl<>();
     testSerializerWithHeapOffheapCache(serializer);
     assertThat(serializer.initCount, is(1));
 
-    serializer = new StatefulSerializerImpl<Long>();
+    serializer = new StatefulSerializerImpl<>();
     testSerializerWithDiskCache(serializer);
     assertThat(serializer.initCount, is(1));
 
-    serializer = new StatefulSerializerImpl<Long>();
+    serializer = new StatefulSerializerImpl<>();
     testSerializerWithHeapDiskCache(serializer);
     assertThat(serializer.initCount, is(1));
 
-    serializer = new StatefulSerializerImpl<Long>();
+    serializer = new StatefulSerializerImpl<>();
     testSerializerWithThreeTierCache(serializer);
     assertThat(serializer.initCount, is(1));
 
@@ -83,7 +81,7 @@ public class SerializersTest {
     CacheManagerBuilder<CacheManager> cmBuilder =
       newCacheManagerBuilder()
         .withCache("heapByRefCache",
-          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10))
+          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10, EntryUnit.ENTRIES))
             .withKeySerializer(serializer)
         );
     cmBuilder.build(true);
@@ -93,7 +91,7 @@ public class SerializersTest {
     CacheManagerBuilder<CacheManager> cmBuilder =
       newCacheManagerBuilder()
         .withCache("heapByValueCache",
-          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10))
+          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10, EntryUnit.ENTRIES))
             .withKeyCopier(SerializingCopier.<Long>asCopierClass())
             .withKeySerializer(serializer)
         );
@@ -114,7 +112,7 @@ public class SerializersTest {
     CacheManagerBuilder<CacheManager> cmBuilder =
       newCacheManagerBuilder()
         .withCache("heapOffheapCache",
-          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10).offheap(2, MemoryUnit.MB))
+          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10, EntryUnit.ENTRIES).offheap(2, MemoryUnit.MB))
             .withKeySerializer(serializer)
         );
     cmBuilder.build(true);
@@ -136,7 +134,7 @@ public class SerializersTest {
       newCacheManagerBuilder()
         .with(persistence(temporaryFolder.newFolder().getAbsolutePath()))
         .withCache("heapDiskCache",
-          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10).disk(8, MemoryUnit.MB, true))
+          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10, EntryUnit.ENTRIES).disk(8, MemoryUnit.MB, true))
             .withKeySerializer(serializer)
         );
     cmBuilder.build(true);
@@ -147,7 +145,7 @@ public class SerializersTest {
       newCacheManagerBuilder()
         .with(persistence(temporaryFolder.newFolder().getAbsolutePath()))
         .withCache("heapOffheapDiskCache",
-          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10).offheap(2, MemoryUnit.MB).disk(8, MemoryUnit.MB, true))
+          newCacheConfigurationBuilder(Long.class, Person.class, newResourcePoolsBuilder().heap(10, EntryUnit.ENTRIES).offheap(2, MemoryUnit.MB).disk(8, MemoryUnit.MB, true))
             .withKeySerializer(serializer)
         );
     cmBuilder.build(true);

@@ -15,14 +15,22 @@
  */
 package org.ehcache.clustered;
 
-import java.io.File;
-import java.util.Collections;
-import org.ehcache.clustered.client.internal.EhcacheClientEntity;
+import java.net.URI;
+
+import org.ehcache.Cache;
+import org.ehcache.CacheManager;
+import org.ehcache.clustered.client.config.builders.ClusteringServiceConfigurationBuilder;
+import org.ehcache.clustered.client.internal.ClusterTierManagerClientEntity;
 import org.ehcache.clustered.common.EhcacheEntityVersion;
 import org.ehcache.clustered.common.ServerSideConfiguration;
-import org.ehcache.clustered.common.internal.ClusteredTierManagerConfiguration;
+import org.ehcache.clustered.common.internal.ClusterTierManagerConfiguration;
+import org.ehcache.config.builders.CacheConfigurationBuilder;
+import org.ehcache.config.builders.CacheManagerBuilder;
+import org.ehcache.config.builders.ResourcePoolsBuilder;
+import org.ehcache.config.units.MemoryUnit;
+import org.ehcache.management.cluster.DefaultClusteringManagementService;
+import org.ehcache.management.statistics.DefaultExtendedStatisticsService;
 import org.hamcrest.Matchers;
-import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -32,71 +40,122 @@ import org.terracotta.connection.Connection;
 import org.terracotta.connection.entity.EntityRef;
 import org.terracotta.exception.EntityAlreadyExistsException;
 import org.terracotta.exception.EntityNotFoundException;
-import org.terracotta.testing.rules.BasicExternalCluster;
 import org.terracotta.testing.rules.Cluster;
 
 import static java.util.Collections.emptyMap;
+import static org.ehcache.clustered.client.config.builders.ClusteredResourcePoolBuilder.clusteredDedicated;
+import static org.ehcache.config.units.EntryUnit.ENTRIES;
+import static org.ehcache.testing.StandardCluster.clusterPath;
+import static org.ehcache.testing.StandardCluster.newCluster;
+import static org.ehcache.testing.StandardCluster.offheapResource;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.fail;
 
 public class BasicEntityInteractionTest {
 
-  private static final String RESOURCE_CONFIG =
-      "<config xmlns:ohr='http://www.terracotta.org/config/offheap-resource'>"
-      + "<ohr:offheap-resources>"
-      + "<ohr:resource name=\"primary-server-resource\" unit=\"MB\">4</ohr:resource>"
-      + "</ohr:offheap-resources>" +
-      "</config>\n";
-
   @ClassRule
-  public static Cluster CLUSTER = new BasicExternalCluster(new File("build/cluster"), 1, Collections.<File>emptyList(), "", RESOURCE_CONFIG, "");
-  private ClusteredTierManagerConfiguration blankConfiguration = new ClusteredTierManagerConfiguration("identifier", new ServerSideConfiguration(emptyMap()));
-
-  @BeforeClass
-  public static void waitForActive() throws Exception {
-    CLUSTER.getClusterControl().waitForActive();
-  }
+  public static Cluster CLUSTER = newCluster().in(clusterPath())
+    .withServiceFragment(offheapResource("primary-server-resource", 4)).build();
+  private ClusterTierManagerConfiguration blankConfiguration = new ClusterTierManagerConfiguration("identifier", new ServerSideConfiguration(emptyMap()));
 
   @Rule
   public TestName testName= new TestName();
 
   @Test
+  public void testClusteringServiceConfigurationBuilderThrowsNPE() throws Exception {
+    String cacheName = "myCACHE";
+    String offheap = "primary-server-resource";
+    URI tsaUri = CLUSTER.getConnectionURI();
+
+    try (CacheManager cacheManager = CacheManagerBuilder.newCacheManagerBuilder()
+      .withCache(cacheName, CacheConfigurationBuilder.newCacheConfigurationBuilder(Long.class, String.class, ResourcePoolsBuilder.newResourcePoolsBuilder()
+        .heap(100, ENTRIES)
+        .with(clusteredDedicated(offheap, 2, MemoryUnit.MB)))
+      ).with(ClusteringServiceConfigurationBuilder.cluster(tsaUri)
+        .autoCreate(server -> server.defaultServerResource(offheap))
+      ).build(true)) {
+      Cache<Long, String> cache = cacheManager.getCache(cacheName, Long.class, String.class);
+      cache.put(1L, "one");
+    }
+
+    try (CacheManager cacheManager = CacheManagerBuilder.newCacheManagerBuilder()
+      .withCache(cacheName, CacheConfigurationBuilder.newCacheConfigurationBuilder(Long.class, String.class, ResourcePoolsBuilder.newResourcePoolsBuilder()
+          .heap(100, ENTRIES)
+          .with(clusteredDedicated(offheap, 2, MemoryUnit.MB))
+        )
+      ).with(ClusteringServiceConfigurationBuilder.cluster(tsaUri)
+      ).using(new DefaultExtendedStatisticsService()
+      ).using(new DefaultClusteringManagementService()
+      ).build(true)) {
+      Cache<Long, String> cache = cacheManager.getCache(cacheName, Long.class, String.class);
+      cache.get(1L);
+    }
+
+  }
+
+  @Test
+  public void testServicesStoppedTwice() throws Exception {
+    String cacheName = "myCACHE";
+    String offheap = "primary-server-resource";
+    URI tsaUri = CLUSTER.getConnectionURI();
+
+    try (CacheManager cacheManager = CacheManagerBuilder.newCacheManagerBuilder()
+      .withCache(cacheName, CacheConfigurationBuilder.newCacheConfigurationBuilder(Long.class, String.class, ResourcePoolsBuilder.newResourcePoolsBuilder()
+        .heap(100, ENTRIES)
+        .with(clusteredDedicated(offheap, 2, MemoryUnit.MB)))
+      ).with(ClusteringServiceConfigurationBuilder.cluster(tsaUri)
+        .autoCreate(server -> server.defaultServerResource(offheap))
+        // manually adding the following two services should work
+      ).using(new DefaultExtendedStatisticsService()
+      ).using(new DefaultClusteringManagementService()
+      ).build(true)) {
+      Cache<Long, String> cache = cacheManager.getCache(cacheName, Long.class, String.class);
+      cache.put(1L, "one");
+    }
+
+    try (CacheManager cacheManager = CacheManagerBuilder.newCacheManagerBuilder()
+      .withCache(cacheName, CacheConfigurationBuilder.newCacheConfigurationBuilder(Long.class, String.class, ResourcePoolsBuilder.newResourcePoolsBuilder()
+          .heap(100, ENTRIES)
+          .with(clusteredDedicated(offheap, 2, MemoryUnit.MB))
+        )
+      ).with(ClusteringServiceConfigurationBuilder.cluster(tsaUri)
+      ).build(true)) {
+      Cache<Long, String> cache = cacheManager.getCache(cacheName, Long.class, String.class);
+      cache.get(1L);
+    }
+
+  }
+
+  @Test
   public void testAbsentEntityRetrievalFails() throws Throwable {
-    Connection client = CLUSTER.newConnection();
-    try {
-      EntityRef<EhcacheClientEntity, ClusteredTierManagerConfiguration> ref = getEntityRef(client);
+    try (Connection client = CLUSTER.newConnection()) {
+      EntityRef<ClusterTierManagerClientEntity, ClusterTierManagerConfiguration, Void> ref = getEntityRef(client);
 
       try {
-        ref.fetchEntity();
+        ref.fetchEntity(null);
         fail("Expected EntityNotFoundException");
       } catch (EntityNotFoundException e) {
         //expected
       }
-    } finally {
-      client.close();
     }
   }
 
   @Test
   public void testAbsentEntityCreationSucceeds() throws Throwable {
-    Connection client = CLUSTER.newConnection();
-    try {
-      EntityRef<EhcacheClientEntity, ClusteredTierManagerConfiguration> ref = getEntityRef(client);
+    try (Connection client = CLUSTER.newConnection()) {
+      EntityRef<ClusterTierManagerClientEntity, ClusterTierManagerConfiguration, Void> ref = getEntityRef(client);
 
       ref.create(blankConfiguration);
-      assertThat(ref.fetchEntity(), not(Matchers.nullValue()));
-    } finally {
-      client.close();
+      assertThat(ref.fetchEntity(null), not(Matchers.nullValue()));
     }
   }
 
   @Test
   public void testPresentEntityCreationFails() throws Throwable {
-    Connection client = CLUSTER.newConnection();
-    try {
-      EntityRef<EhcacheClientEntity, ClusteredTierManagerConfiguration> ref = getEntityRef(client);
+    try (Connection client = CLUSTER.newConnection()) {
+      EntityRef<ClusterTierManagerClientEntity, ClusterTierManagerConfiguration, Void> ref = getEntityRef(client);
 
       ref.create(blankConfiguration);
       try {
@@ -107,7 +166,7 @@ public class BasicEntityInteractionTest {
           //expected
         }
 
-        ClusteredTierManagerConfiguration otherConfiguration = new ClusteredTierManagerConfiguration("different", new ServerSideConfiguration(emptyMap()));
+        ClusterTierManagerConfiguration otherConfiguration = new ClusterTierManagerConfiguration("different", new ServerSideConfiguration(emptyMap()));
         try {
           ref.create(otherConfiguration);
           fail("Expected EntityAlreadyExistsException");
@@ -117,16 +176,13 @@ public class BasicEntityInteractionTest {
       } finally {
         ref.destroy();
       }
-    } finally {
-      client.close();
     }
   }
 
   @Test
   public void testAbsentEntityDestroyFails() throws Throwable {
-    Connection client = CLUSTER.newConnection();
-    try {
-      EntityRef<EhcacheClientEntity, ClusteredTierManagerConfiguration> ref = getEntityRef(client);
+    try (Connection client = CLUSTER.newConnection()) {
+      EntityRef<ClusterTierManagerClientEntity, ClusterTierManagerConfiguration, Void> ref = getEntityRef(client);
 
       try {
         ref.destroy();
@@ -134,82 +190,66 @@ public class BasicEntityInteractionTest {
       } catch (EntityNotFoundException e) {
         //expected
       }
-    } finally {
-      client.close();
     }
   }
 
   @Test
   public void testPresentEntityDestroySucceeds() throws Throwable {
-    Connection client = CLUSTER.newConnection();
-    try {
-      EntityRef<EhcacheClientEntity, ClusteredTierManagerConfiguration> ref = getEntityRef(client);
+    try (Connection client = CLUSTER.newConnection()) {
+      EntityRef<ClusterTierManagerClientEntity, ClusterTierManagerConfiguration, Void> ref = getEntityRef(client);
 
       ref.create(blankConfiguration);
       ref.destroy();
 
       try {
-        ref.fetchEntity();
+        ref.fetchEntity(null);
         fail("Expected EntityNotFoundException");
       } catch (EntityNotFoundException e) {
         //expected
       }
-    } finally {
-      client.close();
     }
   }
 
   @Test
   @Ignore
+  @SuppressWarnings("try")
   public void testPresentEntityDestroyBlockedByHeldReferenceSucceeds() throws Throwable {
-    Connection client = CLUSTER.newConnection();
-    try {
-      EntityRef<EhcacheClientEntity, ClusteredTierManagerConfiguration> ref = getEntityRef(client);
+    try (Connection client = CLUSTER.newConnection()) {
+      EntityRef<ClusterTierManagerClientEntity, ClusterTierManagerConfiguration, Void> ref = getEntityRef(client);
 
       ref.create(blankConfiguration);
 
-      EhcacheClientEntity entity = ref.fetchEntity();
-      try {
+      try (ClusterTierManagerClientEntity entity = ref.fetchEntity(null)) {
         ref.destroy();
-      } finally {
-        entity.close();
       }
-    } finally {
-      client.close();
     }
   }
 
   @Test
   public void testPresentEntityDestroyNotBlockedByReleasedReferenceSucceeds() throws Throwable {
-    Connection client = CLUSTER.newConnection();
-    try {
-      EntityRef<EhcacheClientEntity, ClusteredTierManagerConfiguration> ref = getEntityRef(client);
+    try (Connection client = CLUSTER.newConnection()) {
+      EntityRef<ClusterTierManagerClientEntity, ClusterTierManagerConfiguration, Void> ref = getEntityRef(client);
 
       ref.create(blankConfiguration);
-      ref.fetchEntity().close();
+      ref.fetchEntity(null).close();
       ref.destroy();
-    } finally {
-      client.close();
     }
   }
 
   @Test
   public void testDestroyedEntityAllowsRecreation() throws Throwable {
-    Connection client = CLUSTER.newConnection();
-    try {
-      EntityRef<EhcacheClientEntity, ClusteredTierManagerConfiguration> ref = getEntityRef(client);
+    try (Connection client = CLUSTER.newConnection()) {
+      EntityRef<ClusterTierManagerClientEntity, ClusterTierManagerConfiguration, Void> ref = getEntityRef(client);
 
       ref.create(blankConfiguration);
       ref.destroy();
 
       ref.create(blankConfiguration);
-      assertThat(ref.fetchEntity(), not(nullValue()));
-    } finally {
-      client.close();
+      assertThat(ref.fetchEntity(null), not(nullValue()));
     }
   }
 
-  private EntityRef<EhcacheClientEntity, ClusteredTierManagerConfiguration> getEntityRef(Connection client) throws org.terracotta.exception.EntityNotProvidedException {
-    return client.getEntityRef(EhcacheClientEntity.class, EhcacheEntityVersion.ENTITY_VERSION, testName.getMethodName());
+  private EntityRef<ClusterTierManagerClientEntity, ClusterTierManagerConfiguration, Void> getEntityRef(Connection client) throws org.terracotta.exception.EntityNotProvidedException {
+    return client.getEntityRef(ClusterTierManagerClientEntity.class, EhcacheEntityVersion.ENTITY_VERSION, testName.getMethodName());
   }
 }

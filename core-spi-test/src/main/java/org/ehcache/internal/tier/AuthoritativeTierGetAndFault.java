@@ -16,23 +16,21 @@
 
 package org.ehcache.internal.tier;
 
-import org.ehcache.core.spi.store.StoreAccessException;
-import org.ehcache.expiry.Duration;
-import org.ehcache.expiry.Expirations;
+import org.ehcache.config.builders.ExpiryPolicyBuilder;
+import org.ehcache.spi.resilience.StoreAccessException;
 import org.ehcache.internal.TestTimeSource;
 import org.ehcache.core.spi.store.tiering.AuthoritativeTier;
-import org.ehcache.spi.test.After;
-import org.ehcache.spi.test.Before;
+import org.ehcache.spi.test.After;;
 import org.ehcache.spi.test.Ignore;
 import org.ehcache.spi.test.LegalSPITesterException;
 import org.ehcache.spi.test.SPITest;
 
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 
 /**
@@ -50,15 +48,10 @@ public class AuthoritativeTierGetAndFault<K, V> extends SPIAuthoritativeTierTest
     super(factory);
   }
 
-  @Before
-  public void setUp() {
-  }
-
   @After
   public void tearDown() {
     if (tier != null) {
-//      tier.close();
-      tier = null;
+      factory.close(tier);
     }
   }
 
@@ -93,11 +86,11 @@ public class AuthoritativeTierGetAndFault<K, V> extends SPIAuthoritativeTierTest
 
     try {
       tier.put(key, value);
-      assertThat(tier.getAndFault(key).value(), is(equalTo(value)));
+      assertThat(tier.getAndFault(key).get(), is(equalTo(value)));
 
       fillTierOverCapacity(tier, factory);
 
-      assertThat(tier.get(key).value(), is(equalTo(value)));
+      assertThat(tier.get(key).get(), is(equalTo(value)));
 
     } catch (StoreAccessException e) {
       throw new LegalSPITesterException("Warning, an exception is thrown due to the SPI test");
@@ -108,7 +101,7 @@ public class AuthoritativeTierGetAndFault<K, V> extends SPIAuthoritativeTierTest
   @Ignore
   public void marksTheMappingAsNotExpirable() throws LegalSPITesterException {
     TestTimeSource timeSource = new TestTimeSource();
-    tier = factory.newStoreWithExpiry(Expirations.timeToIdleExpiration(new Duration(1, TimeUnit.MILLISECONDS)), timeSource);
+    tier = factory.newStoreWithExpiry(ExpiryPolicyBuilder.timeToIdleExpiration(Duration.ofMillis(1L)), timeSource);
 
     K key = factory.createKey(1);
     V value = factory.createValue(1);

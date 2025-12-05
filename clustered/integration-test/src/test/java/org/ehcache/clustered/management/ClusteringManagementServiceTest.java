@@ -18,9 +18,8 @@ package org.ehcache.clustered.management;
 import org.ehcache.Cache;
 import org.ehcache.config.units.EntryUnit;
 import org.ehcache.config.units.MemoryUnit;
-import org.junit.BeforeClass;
+import org.hamcrest.MatcherAssert;
 import org.junit.FixMethodOrder;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runners.MethodSorters;
 import org.terracotta.management.model.capabilities.Capability;
@@ -28,8 +27,8 @@ import org.terracotta.management.model.capabilities.descriptors.Descriptor;
 import org.terracotta.management.model.capabilities.descriptors.Settings;
 import org.terracotta.management.model.capabilities.descriptors.StatisticDescriptor;
 import org.terracotta.management.model.cluster.Cluster;
+import org.terracotta.management.model.cluster.ServerEntityIdentifier;
 import org.terracotta.management.model.context.ContextContainer;
-import org.terracotta.management.model.message.Message;
 import org.terracotta.management.model.stats.ContextualStatistics;
 
 import java.util.ArrayList;
@@ -44,31 +43,104 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.ehcache.clustered.client.config.builders.ClusteredResourcePoolBuilder.clusteredDedicated;
 import static org.ehcache.config.builders.CacheConfigurationBuilder.newCacheConfigurationBuilder;
 import static org.ehcache.config.builders.ResourcePoolsBuilder.newResourcePoolsBuilder;
+import static org.ehcache.testing.StandardTimeouts.eventually;
+import static org.hamcrest.Matchers.arrayContainingInAnyOrder;
 
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
 public class ClusteringManagementServiceTest extends AbstractClusteringManagementTest {
 
-  private static final Collection<StatisticDescriptor> ONHEAP_DESCRIPTORS = new ArrayList<>();
-  private static final Collection<StatisticDescriptor> OFFHEAP_DESCRIPTORS = new ArrayList<>();
-  private static final Collection<StatisticDescriptor> DISK_DESCRIPTORS =  new ArrayList<>();
-  private static final Collection<StatisticDescriptor> CLUSTERED_DESCRIPTORS =  new ArrayList<>();
-  private static final Collection<StatisticDescriptor> CACHE_DESCRIPTORS = new ArrayList<>();
-  private static final Collection<StatisticDescriptor> POOL_DESCRIPTORS = new ArrayList<>();
-  private static final Collection<StatisticDescriptor> SERVER_STORE_DESCRIPTORS = new ArrayList<>();
-  private static final Collection<StatisticDescriptor> OFFHEAP_RES_DESCRIPTORS = new ArrayList<>();
-
-  @Test
-  @Ignore("This is not a test, but something useful to show a json print of a cluster topology with all management metadata inside")
-  public void test_A_topology() throws Exception {
-    Cluster cluster = tmsAgentService.readTopology();
-    String json = mapper.writeValueAsString(cluster.toMap());
-    //System.out.println(json);
-  }
+  private static final Collection<StatisticDescriptor> ONHEAP_DESCRIPTORS = Arrays.asList(
+    new StatisticDescriptor("OnHeap:EvictionCount" , "COUNTER"),
+    new StatisticDescriptor("OnHeap:ExpirationCount" , "COUNTER"),
+    new StatisticDescriptor("OnHeap:MissCount" , "COUNTER"),
+    new StatisticDescriptor("OnHeap:MappingCount" , "GAUGE"),
+    new StatisticDescriptor("OnHeap:HitCount" , "COUNTER"),
+    new StatisticDescriptor("OnHeap:PutCount" , "COUNTER"),
+    new StatisticDescriptor("OnHeap:RemovalCount" , "COUNTER")
+  );
+  private static final Collection<StatisticDescriptor> OFFHEAP_DESCRIPTORS = Arrays.asList(
+    new StatisticDescriptor("OffHeap:MissCount", "COUNTER"),
+    new StatisticDescriptor("OffHeap:OccupiedByteSize", "GAUGE"),
+    new StatisticDescriptor("OffHeap:AllocatedByteSize", "GAUGE"),
+    new StatisticDescriptor("OffHeap:MappingCount", "GAUGE"),
+    new StatisticDescriptor("OffHeap:EvictionCount", "COUNTER"),
+    new StatisticDescriptor("OffHeap:ExpirationCount", "COUNTER"),
+    new StatisticDescriptor("OffHeap:HitCount", "COUNTER"),
+    new StatisticDescriptor("OffHeap:PutCount", "COUNTER"),
+    new StatisticDescriptor("OffHeap:RemovalCount", "COUNTER")
+    );
+  private static final Collection<StatisticDescriptor> DISK_DESCRIPTORS =  Arrays.asList(
+    new StatisticDescriptor("Disk:OccupiedByteSize", "GAUGE"),
+    new StatisticDescriptor("Disk:AllocatedByteSize", "GAUGE"),
+    new StatisticDescriptor("Disk:HitCount", "COUNTER"),
+    new StatisticDescriptor("Disk:EvictionCount", "COUNTER"),
+    new StatisticDescriptor("Disk:ExpirationCount", "COUNTER"),
+    new StatisticDescriptor("Disk:MissCount", "COUNTER"),
+    new StatisticDescriptor("Disk:MappingCount", "GAUGE"),
+    new StatisticDescriptor("Disk:PutCount", "COUNTER"),
+    new StatisticDescriptor("Disk:RemovalCount", "COUNTER")
+  );
+  private static final Collection<StatisticDescriptor> CLUSTERED_DESCRIPTORS = Arrays.asList(
+    new StatisticDescriptor("Clustered:MissCount", "COUNTER"),
+    new StatisticDescriptor("Clustered:HitCount", "COUNTER"),
+    new StatisticDescriptor("Clustered:PutCount", "COUNTER"),
+    new StatisticDescriptor("Clustered:RemovalCount", "COUNTER"),
+    new StatisticDescriptor("Clustered:EvictionCount", "COUNTER"),
+    new StatisticDescriptor("Clustered:ExpirationCount", "COUNTER")
+  );
+  private static final Collection<StatisticDescriptor> CACHE_DESCRIPTORS = Arrays.asList(
+    new StatisticDescriptor("Cache:HitCount", "COUNTER"),
+    new StatisticDescriptor("Cache:MissCount", "COUNTER"),
+    new StatisticDescriptor("Cache:PutCount", "COUNTER"),
+    new StatisticDescriptor("Cache:RemovalCount", "COUNTER"),
+    new StatisticDescriptor("Cache:EvictionCount", "COUNTER"),
+    new StatisticDescriptor("Cache:ExpirationCount", "COUNTER"),
+    new StatisticDescriptor("Cache:GetHitLatency#100", "GAUGE"),
+    new StatisticDescriptor("Cache:GetHitLatency#50", "GAUGE"),
+    new StatisticDescriptor("Cache:GetHitLatency#95", "GAUGE"),
+    new StatisticDescriptor("Cache:GetHitLatency#99", "GAUGE"),
+    new StatisticDescriptor("Cache:GetMissLatency#100", "GAUGE"),
+    new StatisticDescriptor("Cache:GetMissLatency#50", "GAUGE"),
+    new StatisticDescriptor("Cache:GetMissLatency#95", "GAUGE"),
+    new StatisticDescriptor("Cache:GetMissLatency#99", "GAUGE"),
+    new StatisticDescriptor("Cache:PutLatency#100", "GAUGE"),
+    new StatisticDescriptor("Cache:PutLatency#50", "GAUGE"),
+    new StatisticDescriptor("Cache:PutLatency#95", "GAUGE"),
+    new StatisticDescriptor("Cache:PutLatency#99", "GAUGE"),
+    new StatisticDescriptor("Cache:RemoveLatency#100", "GAUGE"),
+    new StatisticDescriptor("Cache:RemoveLatency#50", "GAUGE"),
+    new StatisticDescriptor("Cache:RemoveLatency#95", "GAUGE"),
+    new StatisticDescriptor("Cache:RemoveLatency#99", "GAUGE")
+  );
+  private static final Collection<StatisticDescriptor> POOL_DESCRIPTORS = Arrays.asList(
+    new StatisticDescriptor("Pool:AllocatedSize", "GAUGE")
+  );
+  private static final Collection<StatisticDescriptor> SERVER_STORE_DESCRIPTORS = Arrays.asList(
+    new StatisticDescriptor("Store:AllocatedMemory", "GAUGE"),
+    new StatisticDescriptor("Store:DataAllocatedMemory", "GAUGE"),
+    new StatisticDescriptor("Store:OccupiedMemory", "GAUGE"),
+    new StatisticDescriptor("Store:DataOccupiedMemory", "GAUGE"),
+    new StatisticDescriptor("Store:Entries", "COUNTER"),
+    new StatisticDescriptor("Store:UsedSlotCount", "COUNTER"),
+    new StatisticDescriptor("Store:DataVitalMemory", "GAUGE"),
+    new StatisticDescriptor("Store:VitalMemory", "GAUGE"),
+    new StatisticDescriptor("Store:RemovedSlotCount", "COUNTER"),
+    new StatisticDescriptor("Store:DataSize", "GAUGE"),
+    new StatisticDescriptor("Store:TableCapacity", "GAUGE")
+  );
+  private static final Collection<StatisticDescriptor> OFFHEAP_RES_DESCRIPTORS =  Arrays.asList(
+    new StatisticDescriptor("OffHeapResource:AllocatedMemory", "GAUGE")
+  );
 
   @Test
   public void test_A_client_tags_exposed() throws Exception {
-    String[] tags = readTopology().getClient(ehcacheClientIdentifier).get().getTags().toArray(new String[0]);
-    assertThat(tags).containsOnly("server-node-1", "webapp-1");
+    MatcherAssert.assertThat(() -> {
+      try {
+        return readTopology().getClient(ehcacheClientIdentifier).get().getTags().toArray(new String[0]);
+      } catch (Exception e) {
+        throw new AssertionError(e);
+      }
+    }, eventually().matches(arrayContainingInAnyOrder("server-node-1", "webapp-1")));
   }
 
   @Test
@@ -83,92 +155,122 @@ public class ClusteringManagementServiceTest extends AbstractClusteringManagemen
   @Test
   public void test_C_client_capabilities_exposed() throws Exception {
     Capability[] capabilities = readTopology().getClient(ehcacheClientIdentifier).get().getManagementRegistry().get().getCapabilities().toArray(new Capability[0]);
-    assertThat(capabilities.length).isEqualTo(5);
+    assertThat(capabilities.length).isEqualTo(6);
     assertThat(capabilities[0].getName()).isEqualTo("ActionsCapability");
-    assertThat(capabilities[1].getName()).isEqualTo("ManagementAgentService");
-    assertThat(capabilities[2].getName()).isEqualTo("SettingsCapability");
-    assertThat(capabilities[3].getName()).isEqualTo("StatisticCollectorCapability");
-    assertThat(capabilities[4].getName()).isEqualTo("StatisticsCapability");
+    assertThat(capabilities[1].getName()).isEqualTo("DiagnosticCalls");
+    assertThat(capabilities[2].getName()).isEqualTo("NmsAgentService");
+    assertThat(capabilities[3].getName()).isEqualTo("SettingsCapability");
+    assertThat(capabilities[4].getName()).isEqualTo("StatisticCollectorCapability");
+    assertThat(capabilities[5].getName()).isEqualTo("StatisticsCapability");
 
     assertThat(capabilities[0].getDescriptors()).hasSize(4);
 
-    Collection<? extends Descriptor> descriptors = capabilities[4].getDescriptors();
+    Collection<? extends Descriptor> descriptors = capabilities[5].getDescriptors();
     Collection<Descriptor> allDescriptors = new ArrayList<>();
     allDescriptors.addAll(CACHE_DESCRIPTORS);
     allDescriptors.addAll(ONHEAP_DESCRIPTORS);
     allDescriptors.addAll(OFFHEAP_DESCRIPTORS);
     allDescriptors.addAll(CLUSTERED_DESCRIPTORS);
 
-    assertThat(descriptors).containsOnlyElementsOf(allDescriptors);
+    assertThat(descriptors).hasSameElementsAs(allDescriptors);
   }
 
   @Test
   public void test_D_server_capabilities_exposed() throws Exception {
-    Capability[] capabilities = readTopology().getSingleStripe().getActiveServerEntity(ehcacheServerEntityIdentifier).get().getManagementRegistry().get().getCapabilities().toArray(new Capability[0]);
+    Capability[] managerCapabilities = readTopology().getSingleStripe().getActiveServerEntity(clusterTierManagerEntityIdentifier).get().getManagementRegistry().get().getCapabilities().toArray(new Capability[0]);
 
-    assertThat(capabilities.length).isEqualTo(5);
+    assertThat(managerCapabilities).hasSize(3);
 
-    assertThat(capabilities[0].getName()).isEqualTo("ClientStateSettings");
-    assertThat(capabilities[1].getName()).isEqualTo("PoolSettings");
-    assertThat(capabilities[2].getName()).isEqualTo("PoolStatistics");
-    assertThat(capabilities[3].getName()).isEqualTo("ServerStoreSettings");
-    assertThat(capabilities[4].getName()).isEqualTo("ServerStoreStatistics");
+    assertThat(managerCapabilities[0].getName()).isEqualTo("ClusterTierManagerSettings");
+    assertThat(managerCapabilities[1].getName()).isEqualTo("PoolSettings");
+    assertThat(managerCapabilities[2].getName()).isEqualTo("PoolStatistics");
 
-    assertThat(capabilities[3].getDescriptors()).hasSize(4); // time descriptor + 3 dedicated store
+    ServerEntityIdentifier ehcacheClusterTierIdentifier = readTopology()
+      .activeServerEntityStream()
+      .filter(serverEntity -> serverEntity.getName().equals("my-server-entity-1$dedicated-cache-1"))
+      .findFirst()
+      .get() // throws if not found
+      .getServerEntityIdentifier();
+
+    Capability[] tierCapabilities = readTopology().getSingleStripe().getActiveServerEntity(ehcacheClusterTierIdentifier).get().getManagementRegistry().get().getCapabilities().toArray(new Capability[0]);
+    assertThat(tierCapabilities).hasSize(4);
+
+    assertThat(tierCapabilities[0].getName()).isEqualTo("PoolSettings");
+    assertThat(tierCapabilities[1].getName()).isEqualTo("PoolStatistics");
+    assertThat(tierCapabilities[2].getName()).isEqualTo("ServerStoreSettings");
+    assertThat(tierCapabilities[3].getName()).isEqualTo("ServerStoreStatistics");
 
     // stats
 
-    assertThat(capabilities[4].getDescriptors()).containsOnlyElementsOf(SERVER_STORE_DESCRIPTORS);
-    assertThat(capabilities[2].getDescriptors()).containsOnlyElementsOf(POOL_DESCRIPTORS);
+    assertThat(tierCapabilities[3].getDescriptors()).hasSameElementsAs(SERVER_STORE_DESCRIPTORS);
+    assertThat(managerCapabilities[2].getDescriptors()).hasSameElementsAs(POOL_DESCRIPTORS);
+    assertThat(tierCapabilities[1].getDescriptors()).hasSameElementsAs(POOL_DESCRIPTORS);
 
-    // ClientStateSettings
+    // ClusterTierManagerSettings
 
-    assertThat(capabilities[0].getDescriptors()).hasSize(1);
-    Settings settings = (Settings) capabilities[0].getDescriptors().iterator().next();
-    assertThat((String[]) settings.get("attachedStores")).containsOnly("dedicated-cache-1", "shared-cache-2", "shared-cache-3");
+    assertThat(managerCapabilities[0].getDescriptors()).hasSize(1);
+    Settings settings = (Settings) managerCapabilities[0].getDescriptors().iterator().next();
+    assertThat(settings.get("type")).isEqualTo("ClusterTierManager");
+    assertThat(settings.get("defaultServerResource")).isEqualTo("primary-server-resource");
 
-    // ServerStoreSettings
+    // Shared PoolSettings
 
-    List<Descriptor> descriptors = new ArrayList<>(capabilities[1].getDescriptors());
-    assertThat(descriptors).hasSize(4);
+    List<Descriptor> descriptors = new ArrayList<>(managerCapabilities[1].getDescriptors());
+    assertThat(descriptors).hasSize(2);
 
     settings = (Settings) descriptors.get(0);
     assertThat(settings.get("alias")).isEqualTo("resource-pool-b");
     assertThat(settings.get("type")).isEqualTo("Pool");
     assertThat(settings.get("serverResource")).isEqualTo("primary-server-resource");
-    assertThat(settings.get("size")).isEqualTo(16 * 1024 * 1024L);
+    assertThat(settings.get("size")).isEqualTo(8 * 1024 * 1024L);
     assertThat(settings.get("allocationType")).isEqualTo("shared");
 
     settings = (Settings) descriptors.get(1);
     assertThat(settings.get("alias")).isEqualTo("resource-pool-a");
     assertThat(settings.get("type")).isEqualTo("Pool");
     assertThat(settings.get("serverResource")).isEqualTo("secondary-server-resource");
-    assertThat(settings.get("size")).isEqualTo(28 * 1024 * 1024L);
+    assertThat(settings.get("size")).isEqualTo(10 * 1024 * 1024L);
     assertThat(settings.get("allocationType")).isEqualTo("shared");
 
-    settings = (Settings) descriptors.get(2);
+    // Dedicated PoolSettings
+
+    List<Descriptor> tierDescriptors = new ArrayList<>(tierCapabilities[0].getDescriptors());
+    assertThat(tierDescriptors).hasSize(1);
+
+    settings = (Settings) tierDescriptors.get(0);
     assertThat(settings.get("alias")).isEqualTo("dedicated-cache-1");
     assertThat(settings.get("type")).isEqualTo("Pool");
     assertThat(settings.get("serverResource")).isEqualTo("primary-server-resource");
     assertThat(settings.get("size")).isEqualTo(4 * 1024 * 1024L);
     assertThat(settings.get("allocationType")).isEqualTo("dedicated");
 
-    settings = (Settings) descriptors.get(3);
-    assertThat(settings.get("type")).isEqualTo("PoolSettings");
-    assertThat(settings.get("defaultServerResource")).isEqualTo("primary-server-resource");
+    // ServerStoreSettings
+
+    tierDescriptors = new ArrayList<>(tierCapabilities[2].getDescriptors());
+    assertThat(tierDescriptors).hasSize(2);
+
+    settings = (Settings) tierDescriptors.get(0);
+    assertThat(settings.get("alias")).isEqualTo("dedicated-cache-1");
+    assertThat(settings.get("type")).isEqualTo("ServerStore");
+    assertThat(settings.get("resourcePoolType")).isEqualTo("dedicated");
+    assertThat(settings.get("resourcePoolDedicatedResourceName")).isEqualTo("primary-server-resource");
+
+    settings = (Settings) tierDescriptors.get(1);
+    assertThat(settings.get("type")).isEqualTo("ServerStoreSettings");
+    assertThat(settings.get("clusterTierManager")).isEqualTo("my-server-entity-1");
 
     // tms entity
 
-    capabilities = readTopology().activeServerEntityStream().filter(serverEntity -> serverEntity.is(tmsServerEntityIdentifier)).findFirst().get().getManagementRegistry().get().getCapabilities().toArray(new Capability[0]);
-    assertThat(capabilities.length).isEqualTo(3);
+    managerCapabilities = readTopology().activeServerEntityStream().filter(serverEntity -> serverEntity.is(CLUSTER.getTmsServerEntityIdentifier())).findFirst().get().getManagementRegistry().get().getCapabilities().toArray(new Capability[0]);
+    assertThat(managerCapabilities.length).isEqualTo(3);
 
-    assertThat(capabilities[0].getName()).isEqualTo("OffHeapResourceSettings");
-    assertThat(capabilities[1].getName()).isEqualTo("OffHeapResourceStatistics");
-    assertThat(capabilities[2].getName()).isEqualTo("StatisticCollectorCapability");
+    assertThat(managerCapabilities[0].getName()).isEqualTo("OffHeapResourceSettings");
+    assertThat(managerCapabilities[1].getName()).isEqualTo("OffHeapResourceStatistics");
+    assertThat(managerCapabilities[2].getName()).isEqualTo("StatisticCollectorCapability");
 
-    assertThat(capabilities[0].getDescriptors()).hasSize(3); // time + 2 resources
+    assertThat(managerCapabilities[0].getDescriptors()).hasSize(3); // time + 2 resources
 
-    assertThat(capabilities[1].getDescriptors()).containsOnlyElementsOf(OFFHEAP_RES_DESCRIPTORS);
+    assertThat(managerCapabilities[1].getDescriptors()).hasSameElementsAs(OFFHEAP_RES_DESCRIPTORS);
   }
 
   @Test
@@ -181,22 +283,28 @@ public class ClusteringManagementServiceTest extends AbstractClusteringManagemen
         .with(clusteredDedicated("primary-server-resource", 2, MemoryUnit.MB)))
       .build());
 
-    ContextContainer contextContainer = readTopology().getClient(ehcacheClientIdentifier).get().getManagementRegistry().get().getContextContainer();
+    Cluster cluster = readTopology();
+    ContextContainer contextContainer = cluster.getClient(ehcacheClientIdentifier).get().getManagementRegistry().get().getContextContainer();
     assertThat(contextContainer.getSubContexts()).hasSize(4);
 
     TreeSet<String> cNames = contextContainer.getSubContexts().stream().map(ContextContainer::getValue).collect(Collectors.toCollection(TreeSet::new));
     assertThat(cNames).isEqualTo(new TreeSet<>(Arrays.asList("cache-2", "dedicated-cache-1", "shared-cache-2", "shared-cache-3")));
 
-    List<Message> messages = readMessages();
-    assertThat(notificationTypes(messages)).containsOnly("EHCACHE_SERVER_STORE_CREATED", "CACHE_ADDED");
+    if (cluster.serverStream().count() == 2) {
+      waitForAllNotifications(
+        "SERVER_ENTITY_CREATED", "ENTITY_REGISTRY_AVAILABLE", "EHCACHE_SERVER_STORE_CREATED", "SERVER_ENTITY_FETCHED", "CACHE_ADDED",
+        "SERVER_ENTITY_CREATED", "ENTITY_REGISTRY_AVAILABLE", "EHCACHE_SERVER_STORE_CREATED", "CLIENT_REGISTRY_AVAILABLE"); // passive server
+    } else {
+      waitForAllNotifications(
+        "SERVER_ENTITY_CREATED", "ENTITY_REGISTRY_AVAILABLE", "EHCACHE_SERVER_STORE_CREATED", "SERVER_ENTITY_FETCHED", "CACHE_ADDED", "CLIENT_REGISTRY_AVAILABLE");
+    }
   }
 
   @Test
   public void test_F_notifs_on_remove_cache() throws Exception {
     cacheManager.removeCache("cache-2");
 
-    List<Message> messages = readMessages();
-    assertThat(notificationTypes(messages)).containsOnly("CACHE_REMOVED");
+    waitForAllNotifications("CACHE_REMOVED", "SERVER_ENTITY_UNFETCHED", "CLIENT_REGISTRY_AVAILABLE");
   }
 
   @Test
@@ -228,7 +336,7 @@ public class ClusteringManagementServiceTest extends AbstractClusteringManagemen
         .collect(Collectors.toList());
 
       for (ContextualStatistics stat : stats) {
-        val = stat.getStatistic("Cache:HitCount").longValue();
+        val = stat.<Long>getLatestSampleValue("Cache:HitCount").get();
       }
     } while(!Thread.currentThread().isInterrupted() && val != 2);
 
@@ -246,23 +354,25 @@ public class ClusteringManagementServiceTest extends AbstractClusteringManagemen
         .collect(Collectors.toList());
 
       for (ContextualStatistics stat : stats) {
-        val = stat.getStatistic("Cache:HitCount").longValue();
+        val = stat.<Long>getLatestSampleValue("Cache:HitCount").get();
       }
 
     } while(!Thread.currentThread().isInterrupted() && val != 4);
 
     // wait until we have some stats coming from the server entity
-    while (!Thread.currentThread().isInterrupted() &&  !allStats.stream().filter(statistics -> statistics.getContext().contains("consumerId")).findFirst().isPresent()) {
+    while (!Thread.currentThread().isInterrupted() &&  !allStats.stream().anyMatch(statistics -> statistics.getContext().contains("consumerId"))) {
       allStats.addAll(waitForNextStats());
     }
-    List<ContextualStatistics> serverStats = allStats.stream().filter(statistics -> statistics.getContext().contains("consumerId")).collect(Collectors.toList());
+    List<ContextualStatistics> serverStats = allStats.stream()
+      .filter(statistics -> statistics.getContext().contains("consumerId"))
+      .collect(Collectors.toList());
 
     // server-side stats
     TreeSet<String> capabilities = serverStats.stream()
       .map(ContextualStatistics::getCapability)
       .collect(Collectors.toCollection(TreeSet::new));
 
-    assertThat(capabilities).containsOnly("PoolStatistics", "ServerStoreStatistics", "OffHeapResourceStatistics");
+    assertThat(capabilities).contains("PoolStatistics", "ServerStoreStatistics", "OffHeapResourceStatistics");
 
     // ensure we collect stats from all registered objects (pools and stores)
 
@@ -290,72 +400,19 @@ public class ClusteringManagementServiceTest extends AbstractClusteringManagemen
       .filter(statistics -> statistics.getCapability().equals("PoolStatistics"))
       .flatMap(statistics -> statistics.getStatistics().keySet().stream())
       .collect(Collectors.toSet());
-    assertThat(poolDescriptors).containsOnlyElementsOf(POOL_DESCRIPTORS.stream().map(StatisticDescriptor::getName).collect(Collectors.toSet()));
+    assertThat(poolDescriptors).hasSameElementsAs(POOL_DESCRIPTORS.stream().map(StatisticDescriptor::getName).collect(Collectors.toSet()));
 
     Set<String> serverStoreDescriptors = serverStats.stream()
       .filter(statistics -> statistics.getCapability().equals("ServerStoreStatistics"))
       .flatMap(statistics -> statistics.getStatistics().keySet().stream())
       .collect(Collectors.toSet());
-    assertThat(serverStoreDescriptors).containsOnlyElementsOf(SERVER_STORE_DESCRIPTORS.stream().map(StatisticDescriptor::getName).collect(Collectors.toSet()));
+    assertThat(serverStoreDescriptors).hasSameElementsAs(SERVER_STORE_DESCRIPTORS.stream().map(StatisticDescriptor::getName).collect(Collectors.toSet()));
 
     Set<String> offHeapResourceDescriptors = serverStats.stream()
       .filter(statistics -> statistics.getCapability().equals("OffHeapResourceStatistics"))
       .flatMap(statistics -> statistics.getStatistics().keySet().stream())
       .collect(Collectors.toSet());
     assertThat(offHeapResourceDescriptors).isEqualTo(OFFHEAP_RES_DESCRIPTORS.stream().map(StatisticDescriptor::getName).collect(Collectors.toSet()));
-  }
-
-  @BeforeClass
-  public static void initDescriptors() throws ClassNotFoundException {
-    ONHEAP_DESCRIPTORS.add(new StatisticDescriptor("OnHeap:EvictionCount" , "COUNTER"));
-    ONHEAP_DESCRIPTORS.add(new StatisticDescriptor("OnHeap:MissCount" , "COUNTER"));
-    ONHEAP_DESCRIPTORS.add(new StatisticDescriptor("OnHeap:MappingCount" , "COUNTER"));
-    ONHEAP_DESCRIPTORS.add(new StatisticDescriptor("OnHeap:OccupiedByteSize", "SIZE"));
-    ONHEAP_DESCRIPTORS.add(new StatisticDescriptor("OnHeap:HitCount" , "COUNTER"));
-
-    OFFHEAP_DESCRIPTORS.add(new StatisticDescriptor("OffHeap:MissCount", "COUNTER"));
-
-    OFFHEAP_DESCRIPTORS.add(new StatisticDescriptor("OffHeap:OccupiedByteSize", "SIZE"));
-    OFFHEAP_DESCRIPTORS.add(new StatisticDescriptor("OffHeap:AllocatedByteSize", "SIZE"));
-    OFFHEAP_DESCRIPTORS.add(new StatisticDescriptor("OffHeap:MappingCount", "COUNTER"));
-    OFFHEAP_DESCRIPTORS.add(new StatisticDescriptor("OffHeap:EvictionCount", "COUNTER"));
-    OFFHEAP_DESCRIPTORS.add(new StatisticDescriptor("OffHeap:MaxMappingCount", "COUNTER"));
-    OFFHEAP_DESCRIPTORS.add(new StatisticDescriptor("OffHeap:HitCount", "COUNTER"));
-
-    DISK_DESCRIPTORS.add(new StatisticDescriptor("Disk:MaxMappingCount", "COUNTER"));
-    DISK_DESCRIPTORS.add(new StatisticDescriptor("Disk:OccupiedByteSize", "SIZE"));
-    DISK_DESCRIPTORS.add(new StatisticDescriptor("Disk:AllocatedByteSize", "SIZE"));
-    DISK_DESCRIPTORS.add(new StatisticDescriptor("Disk:HitCount", "COUNTER"));
-    DISK_DESCRIPTORS.add(new StatisticDescriptor("Disk:EvictionCount", "COUNTER"));
-    DISK_DESCRIPTORS.add(new StatisticDescriptor("Disk:MissCount", "COUNTER"));
-    DISK_DESCRIPTORS.add(new StatisticDescriptor("Disk:MappingCount", "COUNTER"));
-
-    CLUSTERED_DESCRIPTORS.add(new StatisticDescriptor("Clustered:MissCount", "COUNTER"));
-    CLUSTERED_DESCRIPTORS.add(new StatisticDescriptor("Clustered:HitCount", "COUNTER"));
-    CLUSTERED_DESCRIPTORS.add(new StatisticDescriptor("Clustered:MaxMappingCount", "COUNTER"));
-    CLUSTERED_DESCRIPTORS.add(new StatisticDescriptor("Clustered:EvictionCount", "COUNTER"));
-    CLUSTERED_DESCRIPTORS.add(new StatisticDescriptor("Clustered:OccupiedByteSize", "SIZE"));
-    CLUSTERED_DESCRIPTORS.add(new StatisticDescriptor("Clustered:AllocatedByteSize", "SIZE"));
-    CLUSTERED_DESCRIPTORS.add(new StatisticDescriptor("Clustered:MappingCount", "COUNTER"));
-
-    CACHE_DESCRIPTORS.add(new StatisticDescriptor("Cache:HitCount", "COUNTER"));
-    CACHE_DESCRIPTORS.add(new StatisticDescriptor("Cache:MissCount", "COUNTER"));
-
-    POOL_DESCRIPTORS.add(new StatisticDescriptor("Pool:AllocatedSize", "SIZE"));
-
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:AllocatedMemory", "SIZE"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:DataAllocatedMemory", "SIZE"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:OccupiedMemory", "SIZE"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:DataOccupiedMemory", "SIZE"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:Entries", "COUNTER"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:UsedSlotCount", "COUNTER"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:DataVitalMemory", "SIZE"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:VitalMemory", "SIZE"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:RemovedSlotCount", "COUNTER"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:DataSize", "SIZE"));
-    SERVER_STORE_DESCRIPTORS.add(new StatisticDescriptor("Store:TableCapacity", "SIZE"));
-
-    OFFHEAP_RES_DESCRIPTORS.add(new StatisticDescriptor("OffHeapResource:AllocatedMemory", "SIZE"));
   }
 
 }

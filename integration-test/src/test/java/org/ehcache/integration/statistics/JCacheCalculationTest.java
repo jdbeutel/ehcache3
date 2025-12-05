@@ -1,3 +1,18 @@
+/*
+ * Copyright Terracotta, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.ehcache.integration.statistics;
 
 import java.lang.reflect.Field;
@@ -6,6 +21,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.StreamSupport;
 
 import javax.cache.Cache;
 import javax.cache.CacheManager;
@@ -73,8 +89,6 @@ public class JCacheCalculationTest extends AbstractCacheCalculationTest {
       cacheManager.close();
     }
   }
-
-  // WARNING: forEach and spliterator can't be tested because there are Java 8
 
   @Test
   public void clear() {
@@ -173,7 +187,10 @@ public class JCacheCalculationTest extends AbstractCacheCalculationTest {
     expect(cache.invoke(1, new SetEntryProcessor("a"))).isEqualTo("a"); // put
     changesOf(0, 1, 1, 0); // FIXME Why is there a miss?
 
-    expect(cache.invoke(1, new GetEntryProcessor())).isEqualTo("a"); // hit
+    expect(cache.invoke(1, new SetEntryProcessor("b"))).isEqualTo("b"); // update
+    changesOf(1, 0, 1, 0);
+
+    expect(cache.invoke(1, new GetEntryProcessor())).isEqualTo("b"); // hit
     changesOf(1, 0, 0, 0);
 
     expect(cache.invoke(1, new GetKeyEntryProcessor())).isEqualTo(1); // hit
@@ -203,7 +220,10 @@ public class JCacheCalculationTest extends AbstractCacheCalculationTest {
     changesOf(0, 3, 0, 0);
 
     cache.invokeAll(keys, new SetEntryProcessor("a")); // put
-    changesOf(0, 3, 3, 0); // FIXME Why is there a miss?
+    changesOf(0, 3, 3, 0); // FIXME Why is there misses?
+
+    cache.invokeAll(keys, new SetEntryProcessor("b")); // update
+    changesOf(3, 0, 3, 0); // FIXME Why is there hits?
 
     cache.invokeAll(keys, new GetEntryProcessor()); // hit
     changesOf(3, 0, 0, 0);
@@ -250,6 +270,28 @@ public class JCacheCalculationTest extends AbstractCacheCalculationTest {
   }
 
   @Test
+  public void foreach() {
+    cache.put(1, "a");
+    cache.put(2, "b");
+    cache.put(3, "c");
+    changesOf(0, 0, 3, 0);
+
+    cache.forEach(e -> {});
+    changesOf(3, 0, 0, 0);
+  }
+
+  @Test
+  public void spliterator() {
+    cache.put(1, "a");
+    cache.put(2, "b");
+    cache.put(3, "c");
+    changesOf(0, 0, 3, 0);
+
+    StreamSupport.stream(cache.spliterator(), false).forEach(e -> {});
+    changesOf(3, 0, 0, 0);
+  }
+
+  @Test
   public void loadAll() throws InterruptedException {
     // Skipping loadAll for now
   }
@@ -265,7 +307,7 @@ public class JCacheCalculationTest extends AbstractCacheCalculationTest {
 
   @Test
   public void putAll() {
-    Map<Integer, String> vals = new HashMap<Integer, String>();
+    Map<Integer, String> vals = new HashMap<>();
     vals.put(1, "a");
     vals.put(2, "b");
     cache.putAll(vals);
@@ -371,13 +413,14 @@ public class JCacheCalculationTest extends AbstractCacheCalculationTest {
     cache.get(1); // one miss
     cache.getAll(asSet(1, 2, 3)); // 3 misses
     cache.put(1, "a"); // one put
+    cache.put(1, "b"); // one put and update
     cache.putAll(Collections.singletonMap(2, "b")); // 1 put
     cache.get(1); // one hit
     cache.remove(1); // one remove
     cache.removeAll(); // one remove
-    changesOf(1, 4, 2, 2);
+    changesOf(1, 4, 3, 2);
 
     cacheStatistics.clear();
-    changesOf(-1, -4, -2, -2);
+    changesOf(-1, -4, -3, -2);
   }
 }

@@ -17,23 +17,14 @@ package org.ehcache.integration.statistics;
 
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
 
-import org.assertj.core.api.AbstractBooleanAssert;
-import org.assertj.core.api.AbstractCharSequenceAssert;
-import org.assertj.core.api.AbstractMapAssert;
-import org.assertj.core.api.AbstractObjectAssert;
-import org.ehcache.config.ResourcePools;
+import org.assertj.core.api.SoftAssertions;
 import org.ehcache.config.builders.ResourcePoolsBuilder;
 import org.ehcache.core.statistics.CacheStatistics;
-import org.junit.Rule;
-import org.junit.rules.TemporaryFolder;
+
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.ehcache.config.builders.ResourcePoolsBuilder.newResourcePoolsBuilder;
 import static org.ehcache.config.units.EntryUnit.ENTRIES;
 import static org.ehcache.config.units.MemoryUnit.MB;
@@ -43,19 +34,18 @@ import static org.ehcache.config.units.MemoryUnit.MB;
  * of an Ehcache call on the counters.
  */
 @RunWith(Parameterized.class)
-public abstract class AbstractCacheCalculationTest {
-
-  @Rule
-  public final TemporaryFolder diskPath = new TemporaryFolder();
-
-  protected final ResourcePools resources;
-
-  protected CacheStatistics cacheStatistics;
+public abstract class AbstractCacheCalculationTest extends AbstractCalculationTest {
 
   private int hitCount = 0;
   private int missCount = 0;
   private int putCount = 0;
   private int removalCount = 0;
+
+  protected CacheStatistics cacheStatistics;
+
+  protected AbstractCacheCalculationTest(ResourcePoolsBuilder poolBuilder) {
+    super(poolBuilder);
+  }
 
   /**
    * The tiers setup shouldn't change anything. But to make sure, we test with different permutations
@@ -66,12 +56,16 @@ public abstract class AbstractCacheCalculationTest {
   public static Collection<Object[]> data() {
     return Arrays.asList(new Object[][] {
       //1 tier
+      { newResourcePoolsBuilder().heap(1, MB) },
+      { newResourcePoolsBuilder().heap(100, ENTRIES) },
       { newResourcePoolsBuilder().offheap(1, MB) },
       { newResourcePoolsBuilder().disk(1, MB) },
 
       //2 tiers
       { newResourcePoolsBuilder().heap(1, MB).offheap(2, MB) },
+      { newResourcePoolsBuilder().heap(1, ENTRIES).offheap(2, MB) },
       { newResourcePoolsBuilder().heap(1, MB).disk(2, MB) },
+      { newResourcePoolsBuilder().heap(1, ENTRIES).disk(2, MB) },
 
       //3 tiers
       { newResourcePoolsBuilder().heap(1, MB).offheap(2, MB).disk(3, MB) },
@@ -79,75 +73,36 @@ public abstract class AbstractCacheCalculationTest {
     });
   }
 
-  public AbstractCacheCalculationTest(ResourcePoolsBuilder poolBuilder) {
-    this.resources = poolBuilder.build();
-  }
-
-
-  protected static Set<Integer> asSet(Integer... ints) {
-    return new HashSet<Integer>(Arrays.asList(ints));
-  }
-
   /**
    * Make sure the stat moved only of the expected delta
    *
-   * @param hit how hits are expected to change
-   * @param miss how misses are expected to change
-   * @param put how puts are expected to change
-   * @param remove how removes are expected to change
+   * @param hit how many hits should have happened
+   * @param miss how many misses should have happened
+   * @param put how many puts should have happened
+   * @param remove how many removes should have happened
    */
   protected void changesOf(long hit, long miss, long put, long remove) {
-    assertThat(cacheStatistics.getCacheHits() - hitCount).as("Hits").isEqualTo(hit);
-    assertThat(cacheStatistics.getCacheMisses() - missCount).as("Misses").isEqualTo(miss);
-    assertThat(cacheStatistics.getCachePuts() - putCount).as("Puts").isEqualTo(put);
-    assertThat(cacheStatistics.getCacheRemovals() - removalCount).as("Removals").isEqualTo(remove);
+    SoftAssertions softly = new SoftAssertions();
+    softly.assertThat(cacheStatistics.getCacheHits() - hitCount).as("Hits").isEqualTo(hit);
+    softly.assertThat(cacheStatistics.getCacheMisses() - missCount).as("Misses").isEqualTo(miss);
+    softly.assertThat(cacheStatistics.getCachePuts() - putCount).as("Puts").isEqualTo(put);
+    softly.assertThat(cacheStatistics.getCacheRemovals() - removalCount).as("Removals").isEqualTo(remove);
+    softly.assertAll();
+
     hitCount += hit;
     missCount += miss;
     putCount += put;
     removalCount += remove;
   }
 
-  /**
-   * A little wrapper over {@code assertThat} that just mention that this what we expect from the test. So if the
-   * expectation fails, it's probably the test that is wrong, not the implementation.
-   *
-   * @param actual actual value
-   * @return an AssertJ assertion
-   */
-  protected static <T> AbstractObjectAssert<?, T> expect(T actual) {
-    return assertThat(actual);
-  }
-
-  /**
-   * A little wrapper over {@code assertThat} that just mention that this what we expect from the test. So if the
-   * expectation fails, it's probably the test that is wrong, not the implementation.
-   *
-   * @param actual actual value
-   * @return an AssertJ assertion
-   */
-  protected static AbstractCharSequenceAssert<?, String> expect(String actual) {
-    return assertThat(actual);
-  }
-
-  /**
-   * A little wrapper over {@code assertThat} that just mention that this what we expect from the test. So if the
-   * expectation fails, it's probably the test that is wrong, not the implementation.
-   *
-   * @param actual actual value
-   * @return an AssertJ assertion
-   */
-  protected static AbstractBooleanAssert<?> expect(boolean actual) {
-    return assertThat(actual);
-  }
-
-  /**
-   * A little wrapper over {@code assertThat} that just mention that this what we expect from the test. So if the
-   * expectation fails, it's probably the test that is wrong, not the implementation.
-   *
-   * @param actual actual value
-   * @return an AssertJ assertion
-   */
-  protected static <K, V> AbstractMapAssert<?, ? extends Map<K, V>, K, V> expect(Map<K, V> actual) {
-    return assertThat(actual);
+  @Override
+  protected String counters() {
+    long hits = cacheStatistics.getCacheHits() - hitCount;
+    long misses = cacheStatistics.getCacheMisses() - missCount;
+    long puts = cacheStatistics.getCachePuts() - putCount;
+    long removals = cacheStatistics.getCacheRemovals() - removalCount;
+    long evictions = cacheStatistics.getCacheEvictions();
+    long expirations = cacheStatistics.getCacheExpirations();
+    return String.format(" (H=%d M=%d P=%d R=%d Ev=%d Ex=%d)", hits, misses, puts, removals, evictions, expirations);
   }
 }
