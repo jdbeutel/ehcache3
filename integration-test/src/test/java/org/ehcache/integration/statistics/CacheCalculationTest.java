@@ -244,7 +244,8 @@ public class CacheCalculationTest extends AbstractCacheCalculationTest {
 
   @Test
   public void testClearingStats() {
-    // We do it twice because the second time we already have compensating counters, so the result might fail
+    // We do it three times because after the first time we already have compensating counters, so the result might fail
+    innerClear();
     innerClear();
     innerClear();
   }

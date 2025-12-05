@@ -245,8 +245,8 @@ class DefaultCacheStatistics implements CacheStatistics {
 
     CompensatingCounters snapshot(DefaultCacheStatistics statistics) {
       return new CompensatingCounters(
-        cacheHits + statistics.getHits(),
-        cacheMisses + statistics.getMisses(),
+        cacheHits + statistics.getCacheHits(),
+        cacheMisses + statistics.getCacheMisses(),
         cacheGets + statistics.getCacheGets(),
         cachePuts + statistics.getCachePuts(),
         cacheRemovals + statistics.getCacheRemovals());
